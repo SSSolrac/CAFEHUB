@@ -1,0 +1,19 @@
+.menu-page { padding: 100px 20px 60px; min-height: 100vh; text-align: center; }
+.menu-title { font-size: 36px; margin-bottom: 24px; color: #e75480; font-weight: 700; }
+.menu-loading { max-width: 1100px; margin: 0 auto 20px; background:#fff; border-radius:12px; padding:14px; }
+.featured-grid { max-width:1100px; margin:0 auto 20px; display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:12px; }
+.featured-card { background:#fff; border-radius:14px; padding:12px; border:1px solid #f4d2df; text-align:left; }
+.featured-card img { width:100%; aspect-ratio: 1.15; object-fit:cover; border-radius:10px; }
+.featured-card h3 { margin:10px 0 4px; font-size:1rem; }
+.featured-card p { margin:0; color:#666; }
+.menu-discount-tag { display:inline-block; margin-top:8px !important; font-size:.78rem; font-weight:700; color:#9c2155 !important; background:#ffe5ef; border-radius:999px; padding:4px 9px; }
+.sold-out,.available { display:inline-block; margin-top:8px; font-size:.8rem; padding:3px 9px; border-radius:999px; font-weight:600; }
+.sold-out { background:#fff1f5; color:#bf2456; }
+.available { background:#e8f9f3; color:#27835b; }
+.menu-categories { max-width:1100px; margin:0 auto 20px; display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+.category-chip { text-decoration:none; background:#fff; border:1px solid #f3cade; color:#ba4f7b; padding:8px 12px; border-radius:999px; }
+.menu-grid { display:flex; justify-content:center; gap:20px; flex-wrap:wrap; }
+.menu-card { background:white; padding:20px; border-radius:20px; box-shadow:0 10px 25px rgba(0,0,0,0.08); max-width:520px; width:100%; }
+.menu-card img { width:100%; height:auto; border-radius:15px; object-fit:contain; }
+.menu-cta-wrap { margin-top:22px; }
+.menu-cta { padding:12px 24px; background:#36d7e8; color:#fff; border-radius:999px; text-decoration:none; font-weight:700; }
