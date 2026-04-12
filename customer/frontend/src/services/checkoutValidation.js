@@ -22,8 +22,5 @@ export async function validateCheckout(orderPayload) {
     errors.receipt = "Receipt upload is required.";
   }
 
-  const missingCode = (orderPayload.items || []).some((item) => !String(item.code || "").trim());
-  if (missingCode) errors.items = "Menu item code is missing. Refresh the menu and try again.";
-
   return { isValid: Object.keys(errors).length === 0, errors };
 }

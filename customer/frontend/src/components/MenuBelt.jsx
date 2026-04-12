@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
-import { getMenuCategories } from "../services/menuService";
+import { getMenuCatalog, getMenuCategories } from "../services/menuService";
 import "./MenuBelt.css";
 
 // Default category images
@@ -16,14 +16,14 @@ import chocoJavaFrappe from "../assets/Choco Java Chip Frappe.jpg";
 import blueberrySoda from "../assets/Blueberry Soda.jpg";
 
 const items = [
-  { name: "Cloud Americano", tagLeft: "Iced Coffee", tagRight: "₱120", img: coffee },
-  { name: "Choco Java Chip Frappe", tagLeft: "Frappuccino", tagRight: "₱170", img: chocoJavaFrappe },
-  { name: "Chicken Cordon Bleu", tagLeft: "Rice Meal", tagRight: "₱180", img: rice },
-  { name: "Spanish Latte", tagLeft: "Hot Coffee", tagRight: "₱120", img: hot },
-  { name: "Blueberry Soda", tagLeft: "Non-Caff", tagRight: "₱90", img: blueberrySoda },
-  { name: "Chicken Alfredo Pasta", tagLeft: "Pasta", tagRight: "₱190", img: sandwiches },
-  { name: "Iced Cocoa Tiramisu", tagLeft: "Iced Coffee", tagRight: "₱160", img: coffee },
-  { name: "Burger Steak", tagLeft: "Rice Meal", tagRight: "₱160", img: rice },
+  { name: "Cloud Americano", tagLeft: "Iced Coffee", fallbackPrice: 120, img: coffee },
+  { name: "Choco Java Chip Frappe", tagLeft: "Frappuccino", fallbackPrice: 170, img: chocoJavaFrappe },
+  { name: "Chicken Cordon Bleu", tagLeft: "Rice Meal", fallbackPrice: 180, img: rice },
+  { name: "Spanish Latte", tagLeft: "Hot Coffee", fallbackPrice: 120, img: hot },
+  { name: "Blueberry Soda", tagLeft: "Non-Caff", fallbackPrice: 90, img: blueberrySoda },
+  { name: "Chicken Alfredo Pasta", tagLeft: "Pasta", fallbackPrice: 190, img: sandwiches },
+  { name: "Iced Cocoa Tiramisu", tagLeft: "Iced Coffee", fallbackPrice: 160, img: coffee },
+  { name: "Burger Steak", tagLeft: "Rice Meal", fallbackPrice: 160, img: rice },
 ];
 
 function normalizeText(value) {
@@ -51,20 +51,42 @@ function resolveCategoryId(tagLeft, categories) {
   return "";
 }
 
+function asNumber(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function formatPrice(value) {
+  return `₱${asNumber(value, 0).toFixed(0)}`;
+}
+
+function resolveItemPrice(itemName, fallbackPrice, menuCatalog) {
+  const key = normalizeText(itemName);
+  const match = (Array.isArray(menuCatalog) ? menuCatalog : []).find((entry) => normalizeText(entry?.name) === key);
+  if (!match) return asNumber(fallbackPrice, 0);
+
+  const basePrice = asNumber(match.price, asNumber(fallbackPrice, 0));
+  const discount = asNumber(match.discount, 0);
+  return Math.max(basePrice - discount, 0);
+}
+
 export default function MenuBelt() {
   const navigate = useNavigate();
   const [menuCategories, setMenuCategories] = useState([]);
+  const [menuCatalog, setMenuCatalog] = useState([]);
 
   useEffect(() => {
     let cancelled = false;
 
     const load = async () => {
-      try {
-        const categories = await getMenuCategories();
-        if (!cancelled) setMenuCategories(Array.isArray(categories) ? categories : []);
-      } catch {
-        if (!cancelled) setMenuCategories([]);
-      }
+      const [categoriesResult, catalogResult] = await Promise.allSettled([getMenuCategories(), getMenuCatalog()]);
+      if (cancelled) return;
+
+      const categories = categoriesResult.status === "fulfilled" && Array.isArray(categoriesResult.value) ? categoriesResult.value : [];
+      const catalog = catalogResult.status === "fulfilled" && Array.isArray(catalogResult.value) ? catalogResult.value : [];
+
+      setMenuCategories(categories);
+      setMenuCatalog(catalog);
     };
 
     load();
@@ -74,7 +96,13 @@ export default function MenuBelt() {
   }, []);
 
   // Duplicate items so the loop looks continuous
-  const beltItems = useMemo(() => [...items, ...items], []);
+  const beltItems = useMemo(() => {
+    const pricedItems = items.map((item) => ({
+      ...item,
+      tagRight: formatPrice(resolveItemPrice(item.name, item.fallbackPrice, menuCatalog)),
+    }));
+    return [...pricedItems, ...pricedItems];
+  }, [menuCatalog]);
 
   const handlePick = (picked) => {
     const categoryId = resolveCategoryId(picked?.tagLeft, menuCategories);

@@ -3,6 +3,27 @@ import { Link, useNavigate } from "react-router-dom";
 import { useCart } from "../context/CartContext";
 import { getLatestOrder } from "../services/orderService";
 
+function normalizeStatus(value) {
+  return String(value || "pending").trim().toLowerCase();
+}
+
+function getActiveOrderCardTitle(order) {
+  const status = normalizeStatus(order?.status);
+  if (status === "completed") return "Order Completed";
+  if (status === "delivered") return "Order Delivered";
+  if (status === "cancelled") return "Order Cancelled";
+  if (status === "refunded") return "Order Refunded";
+  return "Order in Progress";
+}
+
+function getActiveOrderCtaLabel(order) {
+  const status = normalizeStatus(order?.status);
+  if (status === "completed" || status === "delivered" || status === "cancelled" || status === "refunded") {
+    return "View Order Status";
+  }
+  return "Track My Order";
+}
+
 export default function Cart() {
   const navigate = useNavigate();
   const { cart, changeQty, removeItem, total, clearCart } = useCart();
@@ -36,12 +57,12 @@ export default function Cart() {
           {activeOrder ? (
             <div style={{ background: "white", padding: "30px", borderRadius: "20px", boxShadow: "0 10px 25px rgba(0,0,0,0.05)", border: "1px solid #eee" }}>
               <div style={{ fontSize: "40px" }}>🥤</div>
-              <h2 style={{ marginBottom: 8 }}>Order in Progress</h2>
+              <h2 style={{ marginBottom: 8 }}>{getActiveOrderCardTitle(activeOrder)}</h2>
               <p style={{ color: "#666", marginBottom: 20 }}>
                 Order <strong>#{activeOrder.code || activeOrder.id}</strong> is currently <strong>{activeOrder.statusLabel || activeOrder.status}</strong>.
               </p>
               <button onClick={() => navigate("/track-order")} style={{ padding: "12px 24px", backgroundColor: "#36d7e8", color: "white", border: "none", borderRadius: "8px", fontWeight: "bold", cursor: "pointer", width: "100%", maxWidth: "300px" }}>
-                Track My Order 📍
+                {getActiveOrderCtaLabel(activeOrder)} 📍
               </button>
             </div>
           ) : (
@@ -84,3 +105,4 @@ export default function Cart() {
     </div>
   );
 }
+

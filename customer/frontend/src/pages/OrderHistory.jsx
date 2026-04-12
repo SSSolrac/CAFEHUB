@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { formatRemainingCancellationTime, getOrderCancellationState, getOrderHistory, getStatusLabel } from "../services/orderService";
+import { getOrderCancellationState, getOrderHistory, getStatusLabel } from "../services/orderService";
 import "./OrderHistory.css";
 
 function formatMoney(value) {
@@ -56,6 +56,11 @@ export default function OrderHistory() {
         {orders.map((order) => {
           const isExpanded = expandedId === order.id;
           const orderItems = Array.isArray(order.items) ? order.items : [];
+          const totalItemQuantity = orderItems.reduce((sum, item) => {
+            const quantity = Number(item.quantity ?? 1);
+            return sum + (Number.isFinite(quantity) && quantity > 0 ? quantity : 1);
+          }, 0);
+          const itemLabel = totalItemQuantity === 1 ? "item" : "items";
           return (
             <article key={order.id} className="history-card">
               <div className="history-row">
@@ -66,12 +71,12 @@ export default function OrderHistory() {
               <p>Placed: {formatDateTime(order.placedAt || order.createdAt)}</p>
               <p>Payment: {String(order.paymentStatus || "pending")} • {order.paymentMethodLabel}</p>
               <p>
-                {order.orderTypeLabel} • {order.paymentMethodLabel} • {orderItems.length} items • <strong>{formatMoney(order.totalAmount)}</strong>
+                {order.orderTypeLabel} • {order.paymentMethodLabel} • {totalItemQuantity} {itemLabel} • <strong>{formatMoney(order.totalAmount)}</strong>
               </p>
               {(() => {
                 const cancellationState = getOrderCancellationState(order);
                 if (cancellationState.canCancel) {
-                  return <p className="history-items-summary">Cancelable for {formatRemainingCancellationTime(cancellationState.remainingSeconds)}</p>;
+                  return <p className="history-items-summary">Can be cancelled while order is still pending.</p>;
                 }
                 return <p className="history-items-summary">{cancellationState.reason}</p>;
               })()}

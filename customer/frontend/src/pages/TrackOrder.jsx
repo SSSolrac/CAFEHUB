@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import { useOrderTracking } from "../hooks/useOrderTracking";
 import {
   cancelOrder,
-  formatRemainingCancellationTime,
   getOrderCancellationState,
   getStatusLabel
 } from "../services/orderService";
@@ -20,23 +19,17 @@ export default function TrackOrder() {
   const [searchId, setSearchId] = useState("");
   const [cancelling, setCancelling] = useState(false);
   const [actionMessage, setActionMessage] = useState("");
-  const [countdownNow, setCountdownNow] = useState(Date.now());
 
   useEffect(() => {
     loadLatest();
   }, [loadLatest]);
 
   useEffect(() => {
-    const timer = setInterval(() => setCountdownNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
     if (!order) return;
     syncCustomerNotifications();
   }, [order]);
 
-  const cancellationState = useMemo(() => getOrderCancellationState(order, countdownNow), [order, countdownNow]);
+  const cancellationState = useMemo(() => getOrderCancellationState(order), [order]);
   const orderItems = useMemo(() => (Array.isArray(order?.items) ? order.items : []), [order?.items]);
 
   const activeTimeline = useMemo(() => {
@@ -120,7 +113,7 @@ export default function TrackOrder() {
               <h3>Need to cancel?</h3>
               {cancellationState.canCancel ? (
                 <p className="track-cancel-info">
-                  Cancellation is available for <strong>{formatRemainingCancellationTime(cancellationState.remainingSeconds)}</strong>
+                  Cancellation is available while your order is still <strong>Pending</strong>. Once it is marked <strong>Preparing</strong>, cancellation is disabled.
                 </p>
               ) : (
                 <p className="track-cancel-expired">{cancellationState.reason || "Cancellation is unavailable for this order."}</p>

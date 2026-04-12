@@ -142,6 +142,37 @@
   font-size: 0.9rem;
 }
 
+.loyalty-reward-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px dashed #efddcf;
+}
+
+.loyalty-reward-row:last-child {
+  border-bottom: 0;
+}
+
+.loyalty-redeem-btn {
+  border: 1px solid #f2b4d4;
+  border-radius: 999px;
+  background: #ff6fa5;
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.loyalty-redeem-btn:disabled {
+  background: #f7d8e7;
+  color: #915b76;
+  cursor: not-allowed;
+}
+
 .loyalty-card__meta {
   margin-top: 10px;
   border-top: 1px solid #efddcf;

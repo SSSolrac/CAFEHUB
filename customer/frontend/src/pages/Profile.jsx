@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import LoyaltyCard from "../components/loyalty/LoyaltyCard";
-import { getCustomerLoyaltyData } from "../services/loyaltyService";
+import { getCustomerLoyaltyData, redeemLoyaltyReward } from "../services/loyaltyService";
 import { getCustomerProfile, saveCustomerProfile } from "../services/profileService";
 import { useAuth } from "../context/AuthContext";
 import "./Profile.css";
@@ -20,9 +20,15 @@ function Profile({ linkComponent: LinkComponent }) {
   const [loyaltyData, setLoyaltyData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [redeemingRewardId, setRedeemingRewardId] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [errors, setErrors] = useState({});
+
+  const loadLoyaltyData = async () => {
+    const data = await getCustomerLoyaltyData();
+    setLoyaltyData(data);
+  };
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -36,9 +42,7 @@ function Profile({ linkComponent: LinkComponent }) {
           ...profile
         };
         setFormData(mergedProfile);
-
-        const data = await getCustomerLoyaltyData();
-        setLoyaltyData(data);
+        await loadLoyaltyData();
       } catch (loadError) {
         setError(loadError?.message || "We couldn't load your account details right now.");
       } finally {
@@ -72,12 +76,30 @@ function Profile({ linkComponent: LinkComponent }) {
     try {
       await saveCustomerProfile(formData);
       setMessage("Profile saved. Checkout will use your latest details automatically.");
-      const data = await getCustomerLoyaltyData();
-      setLoyaltyData(data);
+      await loadLoyaltyData();
     } catch (saveError) {
       setError(saveError?.message || "Unable to save right now. Please try again.");
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleRedeemReward = async (reward) => {
+    const rewardId = String(reward?.id || "").trim();
+    if (!rewardId) return;
+
+    setError("");
+    setMessage("");
+    setRedeemingRewardId(rewardId);
+
+    try {
+      await redeemLoyaltyReward(rewardId);
+      await loadLoyaltyData();
+      setMessage(`${reward?.label || "Reward"} redeemed successfully.`);
+    } catch (redeemError) {
+      setError(redeemError?.message || "Unable to redeem reward right now.");
+    } finally {
+      setRedeemingRewardId("");
     }
   };
 
@@ -91,11 +113,14 @@ function Profile({ linkComponent: LinkComponent }) {
       <div className="profile-page">
       <h1>My Profile</h1>
       <p className="profile-session">Signed in as <strong>{user?.email || session?.user?.email}</strong></p>
-      {user?.customerCode ? <p className="profile-session">Customer Code: <strong>{user.customerCode}</strong></p> : null}
 
       {error ? <p className="field-error profile-top-error">{error}</p> : null}
 
-      {loyaltyData ? <LoyaltyCard loyaltyData={loyaltyData} /> : <p className="loyalty-loading">Loading loyalty card...</p>}
+      {loyaltyData ? (
+        <LoyaltyCard loyaltyData={loyaltyData} onRedeemReward={handleRedeemReward} redeemingRewardId={redeemingRewardId} />
+      ) : (
+        <p className="loyalty-loading">Loading loyalty card...</p>
+      )}
 
       <div className="profile-links">
         <LinkImpl href="/order-history" to="/order-history">View order history</LinkImpl>

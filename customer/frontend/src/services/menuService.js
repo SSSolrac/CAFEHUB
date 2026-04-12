@@ -90,7 +90,7 @@ async function listMenuItemsFromAvailabilityView() {
   const { data, error } = await supabase
     .from("menu_item_effective_availability")
     .select("*")
-    .order("code", { ascending: true });
+    .order("name", { ascending: true });
 
   if (error) return { data: null, error };
   return { data: Array.isArray(data) ? data : [], error: null };
@@ -107,7 +107,7 @@ export async function getMenuItems() {
   }
 
   const supabase = requireSupabaseClient();
-  const { data, error } = await supabase.from("menu_items").select("*").order("code", { ascending: true });
+  const { data, error } = await supabase.from("menu_items").select("*").order("name", { ascending: true });
   if (error) throw asDbError(error, "Unable to load menu items.", { table: "menu_items", operation: "select" });
   return (Array.isArray(data) ? data : []).map(mapMenuItemRow);
 }

@@ -343,6 +343,52 @@ before update on public.profiles
 for each row execute procedure public.prevent_profile_privilege_escalation();
 
 -- =========================================================
+-- BUSINESS SETTINGS (OWNER-MANAGED, PUBLICLY READABLE)
+-- =========================================================
+
+create table if not exists public.business_settings (
+  id integer primary key default 1 check (id = 1),
+  cafe_name text not null default 'Happy Tails Pet Cafe',
+  business_hours text not null default E'Monday - Friday: 8:00 AM - 7:30 PM\nSaturday - Sunday: 8:00 AM - 8:00 PM',
+  contact_number text not null default '0917 520 9713',
+  business_email text not null default 'happytailspetcafe@gmail.com',
+  cafe_address text not null default E'AMCJ Commercial Building, Bonifacio Drive, Pleasantville\nSubdivision, Phase 1, Ilayang Iyam, Lucena, Philippines, 4301',
+  facebook_handle text not null default 'Happy Tails Pet Cafe - Lucena',
+  instagram_handle text not null default '@happytailspetcafelc',
+  logo_url text,
+  updated_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+drop trigger if exists trg_business_settings_updated_at on public.business_settings;
+create trigger trg_business_settings_updated_at
+before update on public.business_settings
+for each row execute procedure public.set_updated_at();
+
+insert into public.business_settings (
+  id,
+  cafe_name,
+  business_hours,
+  contact_number,
+  business_email,
+  cafe_address,
+  facebook_handle,
+  instagram_handle
+)
+values (
+  1,
+  'Happy Tails Pet Cafe',
+  E'Monday - Friday: 8:00 AM - 7:30 PM\nSaturday - Sunday: 8:00 AM - 8:00 PM',
+  '0917 520 9713',
+  'happytailspetcafe@gmail.com',
+  E'AMCJ Commercial Building, Bonifacio Drive, Pleasantville\nSubdivision, Phase 1, Ilayang Iyam, Lucena, Philippines, 4301',
+  'Happy Tails Pet Cafe - Lucena',
+  '@happytailspetcafelc'
+)
+on conflict (id) do nothing;
+
+-- =========================================================
 -- LOGIN HISTORY
 -- =========================================================
 
@@ -821,7 +867,7 @@ begin
 end;
 $$;
 
--- Allow customer cancellation safely (status only, within a short window).
+-- Allow customer cancellation safely (status only, and only while pending).
 create or replace function public.enforce_order_update_rules()
 returns trigger
 language plpgsql
@@ -839,7 +885,7 @@ begin
     return new;
   end if;
 
-  -- Customers may only cancel their own pending order within 5 minutes.
+  -- Customers may only cancel their own order while status is still pending.
   if old.customer_id is distinct from auth.uid() then
     raise exception 'You can only update your own orders.';
   end if;
@@ -847,7 +893,6 @@ begin
   if new.status is distinct from old.status then
     if old.status = 'pending'
       and new.status = 'cancelled'
-      and old.placed_at >= now() - interval '5 minutes'
     then
       -- Prevent tampering with anything except status (+ updated_at via trigger).
       new.code := old.code;
@@ -867,7 +912,7 @@ begin
     end if;
   end if;
 
-  raise exception 'Customers can only cancel pending orders within 5 minutes of placing them.';
+  raise exception 'Customers can only cancel while order status is pending.';
 end;
 $$;
 
@@ -903,6 +948,182 @@ create table if not exists public.order_status_history (
 
 create index if not exists idx_order_status_history_order_id on public.order_status_history(order_id);
 create index if not exists idx_order_status_history_changed_at on public.order_status_history(changed_at desc);
+
+create table if not exists public.loyalty_stamp_events (
+  id uuid primary key default gen_random_uuid(),
+  customer_id uuid not null references public.profiles(id) on delete cascade,
+  order_id uuid not null unique references public.orders(id) on delete cascade,
+  stamp_delta integer not null default 1 check (stamp_delta = 1),
+  source text not null default 'order_completion',
+  earned_at timestamptz not null default now(),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_loyalty_stamp_events_customer_id on public.loyalty_stamp_events(customer_id);
+create index if not exists idx_loyalty_stamp_events_earned_at on public.loyalty_stamp_events(earned_at desc);
+
+create or replace function public.award_loyalty_stamp_for_order()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_inserted_customer_id uuid;
+begin
+  if new.customer_id is null then
+    return new;
+  end if;
+
+  if new.status not in ('completed', 'delivered') then
+    return new;
+  end if;
+
+  if tg_op = 'UPDATE' and old.status in ('completed', 'delivered') then
+    return new;
+  end if;
+
+  insert into public.loyalty_stamp_events (
+    customer_id,
+    order_id,
+    stamp_delta,
+    source,
+    earned_at
+  )
+  values (
+    new.customer_id,
+    new.id,
+    1,
+    'order_completion',
+    coalesce(new.updated_at, new.placed_at, new.created_at, now())
+  )
+  on conflict (order_id) do nothing
+  returning customer_id into v_inserted_customer_id;
+
+  if v_inserted_customer_id is not null then
+    insert into public.loyalty_accounts (customer_id, stamp_count, updated_at)
+    values (v_inserted_customer_id, 1, now())
+    on conflict (customer_id) do update
+      set stamp_count = public.loyalty_accounts.stamp_count + 1,
+          updated_at = now();
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_orders_award_loyalty_stamp on public.orders;
+create trigger trg_orders_award_loyalty_stamp
+after insert or update of status on public.orders
+for each row execute procedure public.award_loyalty_stamp_for_order();
+
+with inserted_stamp_events as (
+  insert into public.loyalty_stamp_events (
+    customer_id,
+    order_id,
+    stamp_delta,
+    source,
+    earned_at
+  )
+  select
+    o.customer_id,
+    o.id,
+    1,
+    'order_completion_backfill',
+    coalesce(o.updated_at, o.placed_at, o.created_at, now())
+  from public.orders o
+  where o.customer_id is not null
+    and o.status in ('completed', 'delivered')
+  on conflict (order_id) do nothing
+  returning customer_id
+),
+stamps_to_add as (
+  select customer_id, count(*)::integer as added_stamps
+  from inserted_stamp_events
+  group by customer_id
+)
+insert into public.loyalty_accounts (customer_id, stamp_count, updated_at)
+select
+  customer_id,
+  added_stamps,
+  now()
+from stamps_to_add
+on conflict (customer_id) do update
+  set stamp_count = public.loyalty_accounts.stamp_count + excluded.stamp_count,
+      updated_at = now();
+
+create or replace function public.redeem_loyalty_reward(
+  p_reward_id uuid,
+  p_notes text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_customer_id uuid;
+  v_reward public.loyalty_rewards%rowtype;
+  v_remaining_stamps integer;
+  v_redemption public.loyalty_redemptions%rowtype;
+begin
+  v_customer_id := auth.uid();
+  if v_customer_id is null then
+    raise exception 'Authentication required.';
+  end if;
+
+  select *
+  into v_reward
+  from public.loyalty_rewards
+  where id = p_reward_id
+    and is_active = true
+  limit 1;
+
+  if not found then
+    raise exception 'Reward is not available.';
+  end if;
+
+  insert into public.loyalty_accounts (customer_id, stamp_count, updated_at)
+  values (v_customer_id, 0, now())
+  on conflict (customer_id) do nothing;
+
+  update public.loyalty_accounts
+  set
+    stamp_count = stamp_count - v_reward.required_stamps,
+    updated_at = now()
+  where customer_id = v_customer_id
+    and stamp_count >= v_reward.required_stamps
+  returning stamp_count into v_remaining_stamps;
+
+  if not found then
+    raise exception 'Not enough stamps to redeem this reward.';
+  end if;
+
+  insert into public.loyalty_redemptions (
+    customer_id,
+    reward_id,
+    redeemed_at,
+    notes
+  )
+  values (
+    v_customer_id,
+    v_reward.id,
+    now(),
+    nullif(trim(coalesce(p_notes, '')), '')
+  )
+  returning * into v_redemption;
+
+  return jsonb_build_object(
+    'redemptionId', v_redemption.id,
+    'customerId', v_customer_id,
+    'rewardId', v_reward.id,
+    'rewardLabel', v_reward.label,
+    'requiredStamps', v_reward.required_stamps,
+    'remainingStamps', v_remaining_stamps,
+    'redeemedAt', v_redemption.redeemed_at
+  );
+end;
+$$;
 
 -- =========================================================
 -- HISTORICAL SALES IMPORTS (staffowner app)
@@ -987,7 +1208,23 @@ select
   o.id as source_id,
   'live_order'::text as source_type,
   o.placed_at as occurred_at,
-  o.total_amount as amount,
+  coalesce(
+    nullif(o.total_amount, 0),
+    (
+      select coalesce(
+        sum(
+          case
+            when oi.line_total > 0 then oi.line_total
+            else greatest(coalesce(oi.unit_price, 0) - coalesce(oi.discount_amount, 0), 0) * greatest(coalesce(oi.quantity, 1), 1)
+          end
+        ),
+        0
+      )
+      from public.order_items oi
+      where oi.order_id = o.id
+    ),
+    greatest(coalesce(o.subtotal, 0) - coalesce(o.discount_total, 0), 0)
+  ) as amount,
   o.status,
   o.payment_status
 from public.orders o
@@ -1108,6 +1345,29 @@ select setval(
 );
 
 -- Starter categories for the new categorized inventory tracker
+-- Remove legacy pet-specific inventory rows to keep cafe inventory focused.
+delete from public.inventory_item_movements
+where inventory_item_id in (
+  select ii.id
+  from public.inventory_items ii
+  left join public.inventory_categories ic on ic.id = ii.category_id
+  where ii.code in ('INV-00038', 'INV-00039', 'INV-00040')
+    or ii.name ilike 'pet %'
+    or ic.name ilike '%pet%'
+);
+
+delete from public.inventory_items
+where code in ('INV-00038', 'INV-00039', 'INV-00040')
+  or name ilike 'pet %'
+  or category_id in (select id from public.inventory_categories where name ilike '%pet%');
+
+delete from public.inventory_categories
+where name ilike '%pet%';
+
+update public.inventory_items
+set notes = null
+where coalesce(notes, '') ilike '%for pets%';
+
 insert into public.inventory_categories (name, sort_order, is_active)
 values
   ('Cafe Kitchen', 1, true),
@@ -1116,8 +1376,7 @@ values
   ('Syrups and Spreads', 4, true),
   ('Packaging', 5, true),
   ('Plastic Bags', 6, true),
-  ('Cleaning and Utilities', 7, true),
-  ('Pet Items', 8, true)
+  ('Cleaning and Utilities', 7, true)
 on conflict (name) do update
 set
   sort_order = excluded.sort_order,
@@ -1162,7 +1421,7 @@ values
   ('INV-00024', (select id from public.inventory_categories where name = 'Packaging' limit 1), 'Thermal paper', 'rolls', 0, 2, '0', null, true),
   ('INV-00025', (select id from public.inventory_categories where name = 'Packaging' limit 1), 'Maya thermal paper', 'pcs', 35, 20, '35', null, true),
   ('INV-00026', (select id from public.inventory_categories where name = 'Packaging' limit 1), 'Takeout box large (styro)', 'pcs', 4, 3, '4', 'For humans', true),
-  ('INV-00027', (select id from public.inventory_categories where name = 'Packaging' limit 1), 'Takeout box small', 'pcs', 12, 6, '12', 'For pets', true),
+  ('INV-00027', (select id from public.inventory_categories where name = 'Packaging' limit 1), 'Takeout box small', 'pcs', 12, 6, '12', null, true),
   ('INV-00028', (select id from public.inventory_categories where name = 'Plastic Bags' limit 1), 'Thankyou plastic takeout XS', 'pack', 1, 1, '1', null, true),
   ('INV-00029', (select id from public.inventory_categories where name = 'Plastic Bags' limit 1), 'Thankyou plastic takeout S', 'pack', 0, 1, '0', null, true),
   ('INV-00030', (select id from public.inventory_categories where name = 'Plastic Bags' limit 1), 'Thankyou plastic takeout M', 'pack', 1, 1, '1', null, true),
@@ -1172,17 +1431,14 @@ values
   ('INV-00034', (select id from public.inventory_categories where name = 'Cleaning and Utilities' limit 1), 'Alcohol', 'bottle', 0.25, 1, '1/4', null, true),
   ('INV-00035', (select id from public.inventory_categories where name = 'Cleaning and Utilities' limit 1), 'Dishwashing liquid', 'bottle', 0.25, 1, '1/4', null, true),
   ('INV-00036', (select id from public.inventory_categories where name = 'Cleaning and Utilities' limit 1), 'Hand soap', 'bottle', 0.75, 1, '3/4', null, true),
-  ('INV-00037', (select id from public.inventory_categories where name = 'Cleaning and Utilities' limit 1), 'Lysol', 'bottle', 0, 1, '0', null, true),
-  ('INV-00038', (select id from public.inventory_categories where name = 'Pet Items' limit 1), 'Pet treat original', 'packs', 3, 1, '3', null, true),
-  ('INV-00039', (select id from public.inventory_categories where name = 'Pet Items' limit 1), 'Pet treat chicken liver', 'pack', 0.25, 1, '1/4', null, true),
-  ('INV-00040', (select id from public.inventory_categories where name = 'Pet Items' limit 1), 'Pet treat pork liver', 'pack', 0, 1, '0', null, true)
+  ('INV-00037', (select id from public.inventory_categories where name = 'Cleaning and Utilities' limit 1), 'Lysol', 'bottle', 0, 1, '0', null, true)
 on conflict (code) do nothing;
 
 select setval(
   'public.inventory_item_code_seq',
   greatest(
     coalesce((select max(substring(code from '[0-9]+$')::bigint) from public.inventory_items where code like 'INV-%'), 0),
-    40
+    37
   ),
   true
 );
@@ -1199,6 +1455,7 @@ on conflict do nothing;
 -- =========================================================
 
 alter table public.profiles enable row level security;
+alter table public.business_settings enable row level security;
 alter table public.login_history enable row level security;
 alter table public.menu_categories enable row level security;
 alter table public.menu_items enable row level security;
@@ -1213,6 +1470,7 @@ alter table public.daily_menu_items enable row level security;
 alter table public.loyalty_accounts enable row level security;
 alter table public.loyalty_rewards enable row level security;
 alter table public.loyalty_redemptions enable row level security;
+alter table public.loyalty_stamp_events enable row level security;
 alter table public.orders enable row level security;
 alter table public.order_items enable row level security;
 alter table public.order_status_history enable row level security;
@@ -1241,6 +1499,17 @@ using (
 with check (
   auth.uid() = id or public.is_owner()
 );
+
+drop policy if exists "business_settings_read_all" on public.business_settings;
+create policy "business_settings_read_all"
+on public.business_settings for select
+using (true);
+
+drop policy if exists "business_settings_owner_only" on public.business_settings;
+create policy "business_settings_owner_only"
+on public.business_settings for all
+using (public.is_owner())
+with check (public.is_owner());
 
 -- public menu readable by everyone
 drop policy if exists "menu_categories_read_all" on public.menu_categories;
@@ -1353,6 +1622,19 @@ using (
 drop policy if exists "loyalty_redemptions_manage_owner_staff" on public.loyalty_redemptions;
 create policy "loyalty_redemptions_manage_owner_staff"
 on public.loyalty_redemptions for all
+using (public.is_owner_or_staff())
+with check (public.is_owner_or_staff());
+
+drop policy if exists "loyalty_stamp_events_read_own_or_staff" on public.loyalty_stamp_events;
+create policy "loyalty_stamp_events_read_own_or_staff"
+on public.loyalty_stamp_events for select
+using (
+  customer_id = auth.uid() or public.is_owner_or_staff()
+);
+
+drop policy if exists "loyalty_stamp_events_manage_owner_staff" on public.loyalty_stamp_events;
+create policy "loyalty_stamp_events_manage_owner_staff"
+on public.loyalty_stamp_events for all
 using (public.is_owner_or_staff())
 with check (public.is_owner_or_staff());
 
@@ -1601,21 +1883,41 @@ begin
         'id', o.id,
         'code', o.code,
         'customerId', o.customer_id,
+        'customerName', coalesce(nullif(trim(p.name), ''), nullif(trim(o.delivery_address->>'name'), '')),
         'status', o.status,
         'paymentStatus', o.payment_status,
         'paymentMethod', o.payment_method,
         'orderType', o.order_type,
-        'totalAmount', o.total_amount,
+        'subtotal', o.subtotal,
+        'discountTotal', o.discount_total,
+        'totalAmount', coalesce(
+          nullif(o.total_amount, 0),
+          (
+            select coalesce(
+              sum(
+                case
+                  when oi.line_total > 0 then oi.line_total
+                  else greatest(coalesce(oi.unit_price, 0) - coalesce(oi.discount_amount, 0), 0) * greatest(coalesce(oi.quantity, 1), 1)
+                end
+              ),
+              0
+            )
+            from public.order_items oi
+            where oi.order_id = o.id
+          ),
+          greatest(coalesce(o.subtotal, 0) - coalesce(o.discount_total, 0), 0)
+        ),
         'placedAt', o.placed_at
       )
       order by o.placed_at desc
     ) as items
     from (
       select *
-      from public.orders
+      from live_orders
       order by placed_at desc
       limit 10
     ) o
+    left join public.profiles p on p.id = o.customer_id
   ),
   alerts as (
     select jsonb_agg(a.alert_obj) as items

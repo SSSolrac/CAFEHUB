@@ -106,7 +106,6 @@ export default function OrderCategory() {
       const discounted = discount > 0 ? Math.max(basePrice - discount, 0) : basePrice;
       return {
         id: item.id,
-        code: item.code,
         name: safeName,
         displayName: safeName,
         image: item.imageUrl || resolveMenuItemImage(safeName, categoryTitle) || getCategoryImage(categoryTitle),
